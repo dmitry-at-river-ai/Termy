@@ -26,6 +26,7 @@ import {
 import { ClaudeCodeSessionState } from './claudeCodeSessionState';
 import { TerminalTitleState } from './terminalTitleState';
 import { resolveTerminalContextMenuAction } from './terminalContextMenuRouter';
+import { fileUriToPlatformPath } from './terminalPathUtils';
 import {
   extractCmdCwd,
   extractCwdFromPromptLines,
@@ -276,15 +277,22 @@ export class TerminalInstance {
       this.xterm.loadAddon(this.fitAddon);
       this.xterm.loadAddon(this.searchAddon);
       
-      // Ctrl+click opens links
-      const webLinksAddon = new WebLinksAddon((event, uri) => {
-        // Only open links on Ctrl+click (Windows/Linux) or Cmd+click (macOS)
-        if (event.ctrlKey || event.metaKey) {
+      // Default OSC 8 hyperlink handler. Without it xterm falls back to a
+      // confirm() dialog plus window.open(), which Electron blocks, so
+      // confirming never opens the target. Hosts (e.g. TerminalView) may
+      // override this with richer, vault-aware handling.
+      this.xterm.options.linkHandler = {
+        allowNonHttpProtocols: true,
+        activate: (event: MouseEvent, uri: string) => {
           event.preventDefault();
-          void shell.openExternal(uri).catch((error) => {
-            errorLog('[Terminal] Failed to open external link:', error);
-          });
-        }
+          this.openHyperlink(uri);
+        },
+      };
+
+      // Click opens detected plain-text URLs directly
+      const webLinksAddon = new WebLinksAddon((event, uri) => {
+        event.preventDefault();
+        this.openHyperlink(uri);
       });
       this.xterm.loadAddon(webLinksAddon);
       this.setupClaudeCodeTuiHandlers();
@@ -295,6 +303,38 @@ export class TerminalInstance {
       errorLog('[Terminal] xterm.js 初始化失败:', error);
       throw new Error(t('terminalInstance.xtermInitFailed', { message: errorMsg }));
     }
+  }
+
+  /**
+   * Open a hyperlink from terminal output using the system handler.
+   * file:// URIs open via shell.openPath; http/https via shell.openExternal.
+   */
+  private openHyperlink(uri: string): void {
+    const filePath = fileUriToPlatformPath(uri);
+    if (filePath) {
+      void shell.openPath(filePath).then((errorMessage) => {
+        if (errorMessage) {
+          errorLog('[Terminal] Failed to open file link:', uri, errorMessage);
+        }
+      });
+      return;
+    }
+
+    let protocol: string;
+    try {
+      protocol = new URL(uri).protocol;
+    } catch {
+      debugLog('[Terminal] Ignoring malformed hyperlink:', uri);
+      return;
+    }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      debugLog('[Terminal] Ignoring hyperlink with unsupported protocol:', uri);
+      return;
+    }
+
+    void shell.openExternal(uri).catch((error) => {
+      errorLog('[Terminal] Failed to open external link:', error);
+    });
   }
 
   private getTheme() {
