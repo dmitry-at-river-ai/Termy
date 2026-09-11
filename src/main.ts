@@ -249,6 +249,15 @@ export default class TerminalPlugin extends Plugin {
       });
     });
 
+    // Keep open terminals on the vault's current appearance. Without this they
+    // keep the palette they were created with, and TUI apps that asked for
+    // color-scheme notifications never learn that light/dark flipped.
+    this.registerEvent(
+      this.app.workspace.on('css-change', () => {
+        this._terminalService?.refreshObsidianTheme();
+      })
+    );
+
     // Add the settings tab
     this.addSettingTab(new TerminalSettingTab(this.app, this));
 

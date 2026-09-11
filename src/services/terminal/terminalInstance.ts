@@ -23,6 +23,13 @@ import {
   type ClaudeCodeExtendedKeyboardMode,
   XTVERSION_RESPONSE,
 } from './claudeCodeTuiSupport';
+import {
+  classifyColorScheme,
+  encodeColorSchemeReport,
+  COLOR_SCHEME_REQUEST_PARAM,
+  COLOR_SCHEME_UPDATE_MODE,
+  type TerminalColorScheme,
+} from './terminalColorScheme';
 import { ClaudeCodeSessionState } from './claudeCodeSessionState';
 import { TerminalTitleState } from './terminalTitleState';
 import { resolveTerminalContextMenuAction } from './terminalContextMenuRouter';
@@ -230,6 +237,8 @@ export class TerminalInstance {
   private commandMarkers: TerminalCommandMarker[] = [];
   private win32InputModeEnabled = false;
   private claudeCodeSessionState = new ClaudeCodeSessionState();
+  private colorSchemeUpdatesEnabled = false;
+  private reportedColorScheme: TerminalColorScheme | null = null;
   private webSocketDisconnected = false;
   private sessionRecoveryNeeded = false;
   private sessionRecoveryInProgress = false;
@@ -296,6 +305,7 @@ export class TerminalInstance {
       });
       this.xterm.loadAddon(webLinksAddon);
       this.setupClaudeCodeTuiHandlers();
+      this.setupColorSchemeHandlers();
       
       debugLog('[Terminal] xterm.js 实例初始化完成');
     } catch (error) {
@@ -665,6 +675,8 @@ export class TerminalInstance {
 
   private resetSessionProtocolState(): void {
     this.win32InputModeEnabled = false;
+    this.colorSchemeUpdatesEnabled = false;
+    this.reportedColorScheme = null;
     this.claudeCodeSessionState.reset();
     this.pendingControlSequenceText = '';
     this.synchronizedOutputCompatibilityState = createSynchronizedOutputCompatibilityState();
@@ -766,6 +778,77 @@ export class TerminalInstance {
         return false;
       }),
     );
+  }
+
+  /**
+   * Answer the color-scheme protocol TUIs use to choose a light or dark palette.
+   *
+   * xterm.js already replies to `OSC 11 ; ? ST` from its theme, but it does not
+   * know DEC private mode 2031 or DSR 996, so without these handlers an app can
+   * neither ask for the scheme directly nor learn that Obsidian's appearance
+   * changed while it was running.
+   */
+  private setupColorSchemeHandlers(): void {
+    this.parserDisposables.push(
+      this.xterm.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+        if (params[0] !== COLOR_SCHEME_UPDATE_MODE) {
+          return false;
+        }
+
+        this.colorSchemeUpdatesEnabled = true;
+        this.reportedColorScheme = this.getColorScheme();
+        return true;
+      }),
+      this.xterm.parser.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => {
+        if (params[0] !== COLOR_SCHEME_UPDATE_MODE) {
+          return false;
+        }
+
+        this.colorSchemeUpdatesEnabled = false;
+        return true;
+      }),
+      this.xterm.parser.registerCsiHandler({ prefix: '?', final: 'n' }, (params) => {
+        if (params[0] !== COLOR_SCHEME_REQUEST_PARAM) {
+          return false;
+        }
+
+        const scheme = this.getColorScheme();
+        this.reportedColorScheme = scheme;
+        this.write(encodeColorSchemeReport(scheme));
+        return true;
+      }),
+    );
+  }
+
+  /**
+   * The color scheme currently presented to applications. Obsidian-themed
+   * terminals follow the vault appearance directly; custom-themed terminals are
+   * classified from their configured background.
+   */
+  private getColorScheme(): TerminalColorScheme {
+    if (this.options.useObsidianTheme) {
+      return activeDocument.body.classList.contains('theme-dark') ? 'dark' : 'light';
+    }
+
+    return classifyColorScheme(this.options.backgroundColor) ?? 'dark';
+  }
+
+  /**
+   * Push `CSI ? 997 ; N n` when the scheme actually changed and the foreground
+   * application asked to be notified.
+   */
+  private notifyColorSchemeChange(): void {
+    if (!this.colorSchemeUpdatesEnabled) {
+      return;
+    }
+
+    const scheme = this.getColorScheme();
+    if (scheme === this.reportedColorScheme) {
+      return;
+    }
+
+    this.reportedColorScheme = scheme;
+    this.write(encodeColorSchemeReport(scheme));
   }
 
   private getClaudeCodeExtendedKeyboardMode(): ClaudeCodeExtendedKeyboardMode {
@@ -2283,12 +2366,40 @@ export class TerminalInstance {
     }, 50);
   }
 
+  /**
+   * Re-apply the palette after Obsidian's appearance changed.
+   *
+   * Obsidian fires `css-change` for every stylesheet mutation, so this bails out
+   * unless the resolved colors really moved. Terminals on a custom palette do
+   * not follow the vault theme at all.
+   */
+  refreshObsidianTheme(): void {
+    if (!this.options.useObsidianTheme || !this.isInitialized) {
+      return;
+    }
+
+    const current = this.xterm.options.theme;
+    const next = this.getTheme();
+    if (
+      current
+      && current.background === next.background
+      && current.foreground === next.foreground
+      && current.cursor === next.cursor
+      && current.selectionBackground === next.selectionBackground
+    ) {
+      return;
+    }
+
+    this.updateTheme();
+  }
+
   updateTheme(): void {
     const theme = this.getTheme();
     this.xterm.options.theme = theme;
     this.xterm.options.allowTransparency = this.shouldUseTransparentTerminalBackground();
     this.syncBackgroundLayerStyles(theme.background);
     this.xterm.refresh(0, this.xterm.rows - 1);
+    this.notifyColorSchemeChange();
   }
 
   updateOptions(options: Partial<TerminalOptions>): void {

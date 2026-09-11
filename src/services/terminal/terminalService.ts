@@ -283,6 +283,22 @@ export class TerminalService {
   }
 
   /**
+   * Re-apply the Obsidian palette to every terminal that follows it.
+   *
+   * Called when the vault appearance changes so open terminals do not keep a
+   * stale light or dark palette until they are recreated.
+   */
+  refreshObsidianTheme(): void {
+    this.terminals.forEach(terminal => {
+      try {
+        terminal.refreshObsidianTheme();
+      } catch (error) {
+        errorLog('[TerminalService] Failed to refresh terminal theme:', error);
+      }
+    });
+  }
+
+  /**
    * Get all terminal instances
    * 
    * @returns An array of all terminal instances
