@@ -158,7 +158,61 @@ export class TerminalView extends ItemView {
         void this.initializeTerminal();
       }
     }, 0);
+
+    // Backstop for activations that do not request focus explicitly (see
+    // setEphemeralState below), e.g. revealing an already-open terminal tab.
+    this.registerEvent(
+      this.app.workspace.on('active-leaf-change', (leaf) => {
+        if (leaf === this.leaf) this.focusTerminal();
+      })
+    );
+
     return Promise.resolve();
+  }
+
+  /**
+   * Activating a tab never puts DOM focus on the xterm textarea: Obsidian
+   * blurs the previously focused element and then calls
+   * `leaf.setEphemeralState({ focus: true })`, whose default `View`
+   * implementation is a no-op. Core views (canvas, pdf, search) focus their
+   * own content here; without this the terminal tab becomes active with focus
+   * left on `document.body`, so keystrokes go nowhere until the pane is
+   * clicked.
+   */
+  setEphemeralState(state: unknown): void {
+    super.setEphemeralState(state);
+    if (state && typeof state === 'object' && (state as { focus?: unknown }).focus) {
+      this.focusTerminal();
+    }
+  }
+
+  /**
+   * Focus the terminal, then re-assert once the activation settles: the
+   * ordering of blur, ephemeral state and `active-leaf-change` differs between
+   * activation routes.
+   */
+  private focusTerminal(): void {
+    const terminal = this.terminalInstance;
+    if (!terminal) return;
+
+    const focus = (guardStolenFocus: boolean): void => {
+      if (this.terminalInstance !== terminal) return;
+      if (this.app.workspace.getActiveViewOfType(TerminalView) !== this) return;
+      // The search bar owns keyboard input while it is open.
+      if (this.searchContainer?.hasClass('is-visible')) return;
+      // Never yank focus out of something the user moved to in the meantime,
+      // such as the command palette or a modal.
+      if (guardStolenFocus) {
+        const doc = this.contentEl.ownerDocument;
+        const active = doc.activeElement;
+        if (active && active !== doc.body && !this.contentEl.contains(active)) return;
+      }
+      terminal.focus();
+    };
+
+    focus(false);
+    const win = this.contentEl.ownerDocument.defaultView ?? window;
+    win.setTimeout(() => focus(true), 50);
   }
 
   /**
@@ -559,7 +613,7 @@ export class TerminalView extends ItemView {
     if (!input) {
       debugLog('[Terminal DnD] No usable file path or text in drop payload');
       errorLog('[Terminal DnD] No usable path details:', this.describeDropPayload(dataTransfer));
-      new Notice('Termy: 未获取到可用文本或路径，请确认拖拽来源是否支持文本或文件。');
+      new Notice('Termy: No usable text or path was found. Check whether the drag source provides text or files.');
       return;
     }
 

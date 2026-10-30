@@ -41,7 +41,7 @@ export interface DefaultShellOption {
 
 // Start preloading immediately
 void preloadTerminalInstance().catch((error) => {
-  errorLog('[TerminalService] 预加载 TerminalInstance 失败:', error);
+  errorLog('[TerminalService] Failed to preload TerminalInstance:', error);
 });
 
 /**
@@ -61,6 +61,10 @@ export class TerminalService {
   
   // Shutdown state flag
   private isShuttingDown = false;
+
+  // One-shot overrides consumed by the next createTerminal() call
+  // (programmatic terminal creation via the plugin's openTerminalWith API)
+  nextCreateOverrides: { shellType?: string; shellArgs?: string[]; cwd?: string; env?: Record<string, string> } | null = null;
 
   constructor(
     app: App,
@@ -86,7 +90,7 @@ export class TerminalService {
     // Listen for server error events
     this.serverManager.on('server-error', (error) => {
       if (!this.isShuttingDown) {
-        errorLog('[TerminalService] 服务器错误:', error);
+        errorLog('[TerminalService] Server error:', error);
         this.handleServerCrash();
       }
     });
@@ -94,21 +98,21 @@ export class TerminalService {
     // Listen for WebSocket disconnect events
     this.serverManager.on('ws-disconnected', () => {
       if (!this.isShuttingDown) {
-        debugLog('[TerminalService] WebSocket 断开');
+        debugLog('[TerminalService] WebSocket disconnected');
         this.handleWebSocketDisconnected();
       }
     });
 
     this.serverManager.on('ws-connected', () => {
       if (!this.isShuttingDown) {
-        debugLog('[TerminalService] WebSocket 已连接');
+        debugLog('[TerminalService] WebSocket connected');
         void this.handleWebSocketConnected();
       }
     });
     
     // Listen for successful server starts
     this.serverManager.on('server-started', (port) => {
-      debugLog(`[TerminalService] 服务器已启动，端口: ${port}`);
+      debugLog(`[TerminalService] Server started on port ${port}`);
     });
   }
 
@@ -188,7 +192,7 @@ export class TerminalService {
       // Ensure the server is running
       await this.serverManager.ensureServer();
       
-      debugLog('[TerminalService] 创建终端');
+      debugLog('[TerminalService] Creating terminal');
 
       // Use the preloaded module
       const { TerminalInstance } = await preloadTerminalInstance();
@@ -198,7 +202,7 @@ export class TerminalService {
       if (this.settings.autoEnterVaultDirectory) {
         cwd = this.getVaultPath();
         if (cwd) {
-          debugLog(`[TerminalService] 自动进入项目目录: ${cwd}`);
+          debugLog(`[TerminalService] Automatically entering project directory: ${cwd}`);
         }
       }
       
@@ -212,9 +216,20 @@ export class TerminalService {
         }
       }
       
+      // Apply one-shot programmatic overrides (openTerminalWith API)
+      const overrides = this.nextCreateOverrides;
+      this.nextCreateOverrides = null;
+      if (overrides?.shellType !== undefined) {
+        shellType = overrides.shellType;
+      }
+      if (overrides?.cwd !== undefined) {
+        cwd = overrides.cwd;
+      }
+
       // Get shell startup arguments
-      const shellArgs = this.settings.shellArgs.length > 0 ? this.settings.shellArgs : undefined;
-      const terminalEnv = this.getTerminalEnvironment();
+      const shellArgs = overrides?.shellArgs
+        ?? (this.settings.shellArgs.length > 0 ? this.settings.shellArgs : undefined);
+      const terminalEnv = { ...this.getTerminalEnvironment(), ...overrides?.env };
       
       // Create the terminal instance with the current settings
       const terminal = new TerminalInstance({
@@ -248,7 +263,7 @@ export class TerminalService {
       return terminal;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      errorLog('[TerminalService] 创建终端实例失败:', errorMessage);
+      errorLog('[TerminalService] Failed to create terminal instance:', errorMessage);
       
       new Notice(t('notices.terminal.createFailed', { message: errorMessage }), 5000);
       
@@ -267,7 +282,7 @@ export class TerminalService {
         return adapter.getBasePath();
       }
     } catch (error) {
-      debugWarn('[TerminalService] 无法获取 Vault 路径:', error);
+      debugWarn('[TerminalService] Failed to resolve vault path:', error);
     }
     return undefined;
   }
@@ -312,23 +327,26 @@ export class TerminalService {
    * 
    * @param id The terminal instance ID
    */
-  async destroyTerminal(id: string): Promise<void> {
+  destroyTerminal(id: string): Promise<void> {
     const terminal = this.terminals.get(id);
     if (terminal) {
       try {
         terminal.destroy();
       } catch (error) {
-        errorLog(`[TerminalService] 销毁终端 ${id} 失败:`, error);
+        errorLog(`[TerminalService] Failed to destroy terminal ${id}:`, error);
       } finally {
         this.terminals.delete(id);
-        
-        // Stop the server if this was the last terminal
+
+        // Keep the shared server warm even when no panes are open. Layout
+        // restoration often destroys the old view immediately before creating
+        // its replacement; stopping here races that replacement and turns a
+        // fast task switch into a PTY initialization timeout.
         if (this.terminals.size === 0 && !this.isShuttingDown) {
-          debugLog('[TerminalService] 最后一个终端已关闭，停止服务器');
-          await this.serverManager.shutdown();
+          debugLog('[TerminalService] Last terminal closed; keeping server running');
         }
       }
     }
+    return Promise.resolve();
   }
 
   /**
@@ -341,7 +359,7 @@ export class TerminalService {
       try {
         terminal.destroy();
       } catch (error) {
-        errorLog(`[TerminalService] 销毁终端 ${id} 失败:`, error);
+        errorLog(`[TerminalService] Failed to destroy terminal ${id}:`, error);
         failedTerminals.push(id);
       }
     }
@@ -351,7 +369,7 @@ export class TerminalService {
 
     // Log a warning if any terminals failed to clean up
     if (failedTerminals.length > 0) {
-      debugWarn(`[TerminalService] 以下终端清理失败: ${failedTerminals.join(', ')}`);
+      debugWarn(`[TerminalService] Failed to clean up terminals: ${failedTerminals.join(', ')}`);
     }
   }
 
@@ -397,17 +415,17 @@ export class TerminalService {
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     
-    debugLog('[TerminalService] 开始关闭终端服务');
+    debugLog('[TerminalService] Shutting down terminal service');
     
     // Destroy all terminals
     this.destroyAllTerminals();
     
     // Ensure the server is stopped
     if (this.serverManager.isServerRunning()) {
-      debugLog('[TerminalService] 停止服务器');
+      debugLog('[TerminalService] Stopping server');
       await this.serverManager.shutdown();
     }
     
-    debugLog('[TerminalService] 终端服务已关闭');
+    debugLog('[TerminalService] Terminal service shut down');
   }
 }

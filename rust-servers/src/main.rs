@@ -50,9 +50,9 @@ fn parse_args() -> u16 {
             "-h" | "--help" => {
                 eprintln!("Usage: termy-server [OPTIONS]");
                 eprintln!("Options:");
-                eprintln!("  -p, --port <PORT>         监听端口 (0 表示随机端口) [默认: 0]");
-                eprintln!("  -h, --help                显示帮助信息");
-                eprintln!("  -V, --version             显示版本信息");
+                eprintln!("  -p, --port <PORT>         Port to listen on (0 selects a random port) [default: 0]");
+                eprintln!("  -h, --help                Show help information");
+                eprintln!("  -V, --version             Show version information");
                 std::process::exit(0);
             }
             "-V" | "--version" => {
@@ -71,7 +71,7 @@ fn parse_args() -> u16 {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command-line arguments
     let port = parse_args();
-    log_debug!("启动参数: port={}", port);
+    log_debug!("Startup arguments: port={}", port);
 
     // Create the server configuration
     let config = ServerConfig { port };
@@ -81,11 +81,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = server.start().await?;
 
     // Keep the main thread running
-    log_info!("Terminal Server 已启动，监听端口: {}", port);
+    log_info!("Terminal Server started, listening on port: {}", port);
 
     // Wait for the Ctrl+C signal
     tokio::signal::ctrl_c().await?;
-    log_info!("收到退出信号，正在关闭服务器...");
+    log_info!("Shutdown signal received; stopping server...");
 
     Ok(())
 }

@@ -188,7 +188,7 @@ export class ServerManager {
    */
   async ensureBinaryUpdated(): Promise<BinaryUpdateResult> {
     if (this.offlineMode) {
-      debugLog('[ServerManager] 离线模式已开启，跳过二进制版本检查与下载');
+      debugLog('[ServerManager] Offline mode enabled; skipping binary version check and download');
       return 'skipped-offline';
     }
     return this.ensureBinaryReady();
@@ -217,7 +217,7 @@ export class ServerManager {
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     
-    debugLog('[ServerManager] 关闭服务器...');
+    debugLog('[ServerManager] Shutting down server...');
     
     // Cancel the reconnect timer
     this.cancelReconnect();
@@ -227,7 +227,7 @@ export class ServerManager {
       try {
         this.ws.close(1000, 'Shutdown');
       } catch (error) {
-        debugWarn('[ServerManager] 关闭 WebSocket 时出错:', error);
+        debugWarn('[ServerManager] Error while closing WebSocket:', error);
       }
       this.ws = null;
     }
@@ -241,7 +241,7 @@ export class ServerManager {
         await new Promise<void>((resolve) => {
           const timeout = window.setTimeout(() => {
             if (this.process && !this.process.killed) {
-              debugWarn('[ServerManager] 强制终止服务器');
+              debugWarn('[ServerManager] Force-killing server');
               this.process.kill('SIGKILL');
             }
             resolve();
@@ -255,7 +255,7 @@ export class ServerManager {
           }
         });
       } catch (error) {
-        errorLog('[ServerManager] 停止服务器时出错:', error);
+        errorLog('[ServerManager] Error while stopping server:', error);
       } finally {
         this.process = null;
       }
@@ -273,7 +273,7 @@ export class ServerManager {
     
     this.emit('server-stopped');
     
-    debugLog('[ServerManager] 服务器已关闭');
+    debugLog('[ServerManager] Server shut down');
   }
 
   /**
@@ -340,7 +340,7 @@ export class ServerManager {
    */
   private async startServer(): Promise<void> {
     try {
-      debugLog('[ServerManager] 启动统一服务器...');
+      debugLog('[ServerManager] Starting unified server...');
       
       const binaryPath = this.getBinaryPath();
       
@@ -360,11 +360,11 @@ export class ServerManager {
         detached: false,
       });
       
-      debugLog('[ServerManager] 服务器进程已启动, PID:', this.process.pid);
+      debugLog('[ServerManager] Server process started, PID:', this.process.pid);
       
       // Listen for process errors
       this.process.on('error', (error) => {
-        errorLog('[ServerManager] 服务器进程错误:', error);
+        errorLog('[ServerManager] Server process error:', error);
         this.handleServerError(error);
       });
       
@@ -373,7 +373,7 @@ export class ServerManager {
       this.port = port;
       this.restartAttempts = 0;
       
-      debugLog(`[ServerManager] 服务器已启动，端口: ${port}`);
+      debugLog(`[ServerManager] Server started on port ${port}`);
       
       // Set up the exit handler
       this.setupServerExitHandler();
@@ -387,7 +387,7 @@ export class ServerManager {
       this.serverStartPromise = null;
       
       const errorMessage = error instanceof Error ? error.message : String(error);
-      errorLog('[ServerManager] 启动服务器失败:', errorMessage);
+      errorLog('[ServerManager] Failed to start server:', errorMessage);
       
       new Notice(t('notices.serverStartFailed', { message: errorMessage }), 0);
       
@@ -414,7 +414,7 @@ export class ServerManager {
       if (!this.fs.existsSync(binaryPath)) {
         throw new ServerManagerError(
           ServerErrorCode.BINARY_NOT_FOUND,
-          '离线模式已开启，未进行版本检查与下载，请确保服务器二进制已存在'
+          'Offline mode is enabled; no version check or download was attempted. Ensure the server binary exists.'
         );
       }
       return 'skipped-offline';
@@ -450,20 +450,20 @@ export class ServerManager {
     });
 
     if (!needsDownload && !needsUpdate) {
-      debugLog('[ServerManager] 二进制文件已是最新，无需下载');
+      debugLog('[ServerManager] Binary is already up to date; no download needed');
       return 'already-ready';
     }
 
     const shouldRestart = needsUpdate && this.isServerRunning();
     if (shouldRestart) {
-      debugLog('[ServerManager] 服务器运行中，更新前先停止服务器');
+      debugLog('[ServerManager] Server is running; stopping it before update');
       await this.shutdown();
     }
 
     const messageKey = needsUpdate ? 'notices.updatingBinary' : 'notices.downloadingBinary';
-    const defaultMessage = needsUpdate ? '正在更新服务器组件...' : '正在下载服务器组件...';
+    const defaultMessage = needsUpdate ? 'Updating terminal server...' : 'Downloading terminal server...';
 
-    debugLog(`[ServerManager] ${needsUpdate ? '二进制文件需要更新' : '二进制文件不存在'}，开始下载...`);
+    debugLog(`[ServerManager] ${needsUpdate ? 'Binary needs an update' : 'Binary is missing'}; starting download...`);
 
     const notice = new Notice(
       t(messageKey) || defaultMessage,
@@ -479,13 +479,13 @@ export class ServerManager {
             `${t(messageKey) || defaultMessage} ${Math.round(progress.percent)}%`
           );
         } else if (progress.stage === 'verifying') {
-          notice.setMessage(t('notices.verifyingBinary') || '正在验证文件...');
+          notice.setMessage(t('notices.verifyingBinary') || 'Verifying binary...');
         }
       });
 
       notice.hide();
       const completeKey = needsUpdate ? 'notices.binaryUpdateComplete' : 'notices.binaryDownloadComplete';
-      const completeMessage = needsUpdate ? '服务器组件更新完成' : '服务器组件下载完成';
+      const completeMessage = needsUpdate ? 'Terminal server update completed' : 'Terminal server download completed';
       new Notice(t(completeKey) || completeMessage, 3000);
       updateSucceeded = true;
       return needsUpdate ? 'updated' : 'downloaded';
@@ -494,7 +494,7 @@ export class ServerManager {
       notice.hide();
       throw new ServerManagerError(
         ServerErrorCode.BINARY_NOT_FOUND,
-        `下载二进制文件失败: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`
+        `Failed to download binary: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`
       );
     } finally {
       if (shouldRestart) {
@@ -502,7 +502,7 @@ export class ServerManager {
         if (updateSucceeded) {
           window.setTimeout(() => {
             this.ensureServer().catch((error) => {
-              errorLog('[ServerManager] 更新后重启服务器失败:', error);
+              errorLog('[ServerManager] Failed to restart server after update:', error);
             });
           }, 0);
         }
@@ -523,11 +523,11 @@ export class ServerManager {
       const isExecutable = (stats.mode & 0o111) !== 0;
       
       if (!isExecutable) {
-        debugLog('[ServerManager] 添加可执行权限:', filePath);
+        debugLog('[ServerManager] Adding executable permission:', filePath);
         await this.fs.promises.chmod(filePath, 0o755);
       }
     } catch (error) {
-      errorLog('[ServerManager] 设置可执行权限失败:', error);
+      errorLog('[ServerManager] Failed to set executable permission:', error);
     }
   }
 
@@ -539,7 +539,7 @@ export class ServerManager {
       if (!this.process || !this.process.stdout) {
         reject(new ServerManagerError(
           ServerErrorCode.SERVER_START_FAILED,
-          '进程未启动'
+          'Server process did not start'
         ));
         return;
       }
@@ -550,7 +550,7 @@ export class ServerManager {
         this.process?.stdout?.off('data', onData);
         reject(new ServerManagerError(
           ServerErrorCode.SERVER_START_FAILED,
-          '等待端口信息超时'
+          'Timed out waiting for server port information'
         ));
       }, 10000);
 
@@ -564,7 +564,7 @@ export class ServerManager {
             if (info.port && typeof info.port === 'number') {
               window.clearTimeout(timeout);
               this.process?.stdout?.off('data', onData);
-              debugLog('[ServerManager] 解析到服务器信息:', info);
+              debugLog('[ServerManager] Parsed server information:', info);
               resolve(info.port);
             }
           }
@@ -585,7 +585,7 @@ export class ServerManager {
         if (code !== 0 && code !== null) {
           reject(new ServerManagerError(
             ServerErrorCode.SERVER_START_FAILED,
-            `服务器启动失败，退出码: ${code}`
+            `Server exited during startup with code ${code}`
           ));
         }
       });
@@ -605,13 +605,13 @@ export class ServerManager {
         this.wsConnectPromise = null;
         reject(new ServerManagerError(
           ServerErrorCode.CONNECTION_FAILED,
-          '服务器端口未知'
+          'Server port is unknown'
         ));
         return;
       }
 
       const wsUrl = `ws://127.0.0.1:${this.port}`;
-      debugLog('[ServerManager] 连接 WebSocket:', wsUrl);
+      debugLog('[ServerManager] Connecting WebSocket:', wsUrl);
       
       this.ws = new WebSocket(wsUrl);
       const ws = this.ws;
@@ -622,13 +622,13 @@ export class ServerManager {
         }
         reject(new ServerManagerError(
           ServerErrorCode.CONNECTION_FAILED,
-          'WebSocket 连接超时'
+          'WebSocket connection timed out'
         ));
       }, 5000);
 
       ws.onopen = () => {
         window.clearTimeout(timeout);
-        debugLog('[ServerManager] WebSocket 已连接');
+        debugLog('[ServerManager] WebSocket connected');
         
         // Reset the reconnect counter
         this.wsReconnectAttempts = 0;
@@ -642,7 +642,7 @@ export class ServerManager {
       };
 
       ws.onclose = (event) => {
-        debugLog('[ServerManager] WebSocket 已断开, code:', event.code, 'reason:', event.reason);
+        debugLog('[ServerManager] WebSocket disconnected, code:', event.code, 'reason:', event.reason);
         if (this.ws === ws) {
           this.ws = null;
           this.wsConnectPromise = null;
@@ -652,7 +652,7 @@ export class ServerManager {
         this._ptyClient?.setWebSocket(null);
 
         if (this.isDevInstallInProgress()) {
-          debugLog('[ServerManager] 开发安装进行中，跳过 WebSocket 重连通知');
+          debugLog('[ServerManager] Development install in progress; skipping WebSocket reconnect notification');
           return;
         }
         
@@ -666,7 +666,7 @@ export class ServerManager {
 
       ws.onerror = (event) => {
         window.clearTimeout(timeout);
-        errorLog('[ServerManager] WebSocket 错误:', event);
+        errorLog('[ServerManager] WebSocket error:', event);
         // Do not reject here; let onclose handle it
       };
 
@@ -703,7 +703,7 @@ export class ServerManager {
           this._ptyClient?.handleBinaryMessage(buffer);
         })
         .catch((error) => {
-          errorLog('[ServerManager] 解析二进制消息失败:', error);
+          errorLog('[ServerManager] Failed to parse binary message:', error);
         });
       return;
     }
@@ -718,10 +718,10 @@ export class ServerManager {
           this._ptyClient?.handleMessage(msg);
           break;
         default:
-          debugWarn('[ServerManager] 未知模块消息:', msg);
+          debugWarn('[ServerManager] Unknown module message:', msg);
       }
     } catch (error) {
-      errorLog('[ServerManager] 解析消息失败:', error);
+      errorLog('[ServerManager] Failed to parse message:', error);
     }
   }
 
@@ -735,18 +735,18 @@ export class ServerManager {
     }
 
     if (this.isDevInstallInProgress()) {
-      debugLog('[ServerManager] 开发安装进行中，跳过 WebSocket 自动重连');
+      debugLog('[ServerManager] Development install in progress; skipping automatic WebSocket reconnect');
       return;
     }
     
     // Check whether the maximum reconnect attempts has been exceeded
     if (this.wsReconnectAttempts >= this.reconnectConfig.maxAttempts) {
       errorLog(
-        `[ServerManager] WebSocket 重连失败，已达到最大重试次数 (${this.reconnectConfig.maxAttempts})`
+        `[ServerManager] WebSocket reconnect failed after ${this.reconnectConfig.maxAttempts} attempts`
       );
       
       new Notice(
-        t('notices.wsReconnectFailed') || 'WebSocket 连接断开，请重新加载插件',
+        t('notices.wsReconnectFailed') || 'WebSocket disconnected. Reload the plugin.',
         0
       );
       
@@ -760,7 +760,7 @@ export class ServerManager {
     const delay = this.reconnectConfig.interval;
     
     debugLog(
-      `[ServerManager] 将在 ${delay}ms 后尝试重连 WebSocket ` +
+      `[ServerManager] Retrying WebSocket connection in ${delay}ms ` +
       `(${this.wsReconnectAttempts}/${this.reconnectConfig.maxAttempts})`
     );
     
@@ -781,19 +781,19 @@ export class ServerManager {
       return;
     }
     
-    debugLog('[ServerManager] 尝试重连 WebSocket...');
+    debugLog('[ServerManager] Attempting to reconnect WebSocket...');
     
     try {
       await this.connectWebSocket();
       
-      debugLog('[ServerManager] WebSocket 重连成功');
+      debugLog('[ServerManager] WebSocket reconnected');
       new Notice(
-        t('notices.wsReconnectSuccess') || 'WebSocket 重连成功',
+        t('notices.wsReconnectSuccess') || 'WebSocket reconnected',
         3000
       );
       
     } catch (error) {
-      errorLog('[ServerManager] WebSocket 重连失败:', error);
+      errorLog('[ServerManager] WebSocket reconnect failed:', error);
       this.isReconnecting = false;
       
       // Keep trying to reconnect
@@ -833,7 +833,7 @@ export class ServerManager {
       }
       
       if (this.isShuttingDown) {
-        debugLog(`[ServerManager] 服务器已停止: code=${code}, signal=${signal}`);
+        debugLog(`[ServerManager] Server stopped: code=${code}, signal=${signal}`);
         return;
       }
       
@@ -844,11 +844,11 @@ export class ServerManager {
       };
 
       const logExit = exitDetails.abnormal ? errorLog : debugWarn;
-      logExit(`[ServerManager] 服务器退出: code=${code}, signal=${signal}`);
+      logExit(`[ServerManager] Server exited: code=${code}, signal=${signal}`);
 
       if (this.isDevInstallInProgress()) {
         this.cancelReconnect();
-        debugLog('[ServerManager] 开发安装进行中，跳过服务器自动重启');
+        debugLog('[ServerManager] Development install in progress; skipping automatic server restart');
         return;
       }
 
@@ -864,7 +864,7 @@ export class ServerManager {
     if (this.restartAttempts < this.maxRestartAttempts) {
       this.restartAttempts++;
       debugLog(
-        `[ServerManager] 尝试重启服务器 ` +
+        `[ServerManager] Attempting to restart server ` +
         `(${this.restartAttempts}/${this.maxRestartAttempts})`
       );
       
@@ -873,10 +873,10 @@ export class ServerManager {
       window.setTimeout(() => {
         this.ensureServer()
           .then(() => {
-            debugLog('[ServerManager] 服务器自动重启成功');
+            debugLog('[ServerManager] Server restarted automatically');
           })
           .catch(err => {
-            errorLog('[ServerManager] 服务器重启失败:', err);
+            errorLog('[ServerManager] Server restart failed:', err);
             this.showRestartFailedNotice(exitDetails);
           });
       }, delay);
@@ -934,7 +934,7 @@ export class ServerManager {
 
       return true;
     } catch (error) {
-      debugWarn('[ServerManager] 读取开发安装标记失败:', error);
+      debugWarn('[ServerManager] Failed to read development install marker:', error);
       return false;
     }
   }
@@ -947,23 +947,23 @@ export class ServerManager {
     
     if (errorCode === 'ENOENT') {
       new Notice(
-        '❌ 无法启动服务器\n\n' +
-        '错误: 二进制文件未找到\n' +
-        '请重新加载插件',
+        '❌ Unable to start the server\n\n' +
+        'Error: Binary file not found\n' +
+        'Reload the plugin',
         0
       );
     } else if (errorCode === 'EACCES') {
       new Notice(
-        '❌ 无法启动服务器\n\n' +
-        '错误: 权限不足\n' +
-        '请检查文件权限',
+        '❌ Unable to start the server\n\n' +
+        'Error: Permission denied\n' +
+        'Check file permissions',
         0
       );
     } else {
       new Notice(
-        `❌ 服务器启动失败\n\n` +
-        `错误: ${error.message}\n` +
-        `请查看控制台获取详细信息`,
+        `❌ Server failed to start\n\n` +
+        `Error: ${error.message}\n` +
+        `See the developer console for details`,
         0
       );
     }
@@ -984,7 +984,7 @@ export class ServerManager {
         try {
           (listener as (...args: Parameters<ServerEvents[K]>) => void)(...args);
         } catch (error) {
-          errorLog(`[ServerManager] 事件处理器错误 (${event}):`, error);
+          errorLog(`[ServerManager] Event handler failed (${event}):`, error);
         }
       });
     }
@@ -1007,7 +1007,7 @@ export class ServerManager {
     if (this.isShuttingDown) {
       throw new ServerManagerError(
         ServerErrorCode.CONNECTION_FAILED,
-        '服务器正在关闭'
+        'Server is shutting down'
       );
     }
     
@@ -1042,7 +1042,7 @@ export class ServerManager {
     
     if (hasChanges) {
       Object.assign(this.reconnectConfig, config);
-      debugLog('[ServerManager] 更新重连配置:', this.reconnectConfig);
+      debugLog('[ServerManager] Updated reconnect configuration:', this.reconnectConfig);
     }
   }
   
@@ -1051,7 +1051,7 @@ export class ServerManager {
       return;
     }
     this.debugMode = debugMode;
-    debugLog('[ServerManager] 更新调试模式:', this.debugMode);
+    debugLog('[ServerManager] Updated debug mode:', this.debugMode);
   }
   
   updateOfflineMode(offlineMode: boolean): void {
@@ -1059,7 +1059,7 @@ export class ServerManager {
       return;
     }
     this.offlineMode = offlineMode;
-    debugLog('[ServerManager] 更新离线模式:', this.offlineMode);
+    debugLog('[ServerManager] Updated offline mode:', this.offlineMode);
   }
 
   updateBinaryDownloadConfig(downloadConfig: BinaryDownloadConfig): void {
@@ -1075,6 +1075,6 @@ export class ServerManager {
       return;
     }
     this.binaryDownloader = new BinaryDownloader(this.pluginDir, this.version, nextConfig);
-    debugLog('[ServerManager] 更新二进制下载配置:', nextConfig);
+    debugLog('[ServerManager] Updated binary download configuration:', nextConfig);
   }
 }

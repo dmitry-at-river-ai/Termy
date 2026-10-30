@@ -115,7 +115,7 @@ impl PtyHandler {
         let rows = rows.filter(|value| *value > 0).unwrap_or(24);
         
         log_info!(
-            "初始化 PTY 会话: session_id={}, shell_type={:?}, cwd={:?}, size={}x{}",
+            "Initializing PTY session: session_id={}, shell_type={:?}, cwd={:?}, size={}x{}",
             session_id,
             shell_type,
             cwd,
@@ -131,7 +131,7 @@ impl PtyHandler {
             shell_args.as_ref().map(|v| v.as_slice()),
             cwd.as_deref(),
             env.as_ref(),
-        ).map_err(|e| RouterError::ModuleError(format!("创建 PTY 会话失败: {}", e)))?;
+        ).map_err(|e| RouterError::ModuleError(format!("Failed to create PTY session: {}", e)))?;
         
         // Create the session context
         let pty_session = Arc::new(TokioMutex::new(pty_session));
@@ -153,7 +153,7 @@ impl PtyHandler {
             sessions.insert(session_id.clone(), context);
         }
         
-        log_info!("PTY 会话创建成功: session_id={}", session_id);
+        log_info!("PTY session created: session_id={}", session_id);
         
         // Return a success response that includes the session_id
         Ok(Some(ServerResponse::new(
@@ -273,7 +273,7 @@ impl PtyHandler {
 
                 if !batch_buffer.is_empty() {
                     log_debug!(
-                        "读取 PTY 输出(批处理): session_id={}, {} 字节",
+                        "Reading PTY output (batched): session_id={}, {} bytes",
                         session_id,
                         batch_buffer.len()
                     );
@@ -290,7 +290,7 @@ impl PtyHandler {
 
                     let mut sender = ws_sender.lock().await;
                     if let Err(e) = sender.send(Message::Binary(frame.into())).await {
-                        log_error!("发送 PTY 输出失败: session_id={}, {}", session_id, e);
+                        log_error!("Failed to send PTY output: session_id={}, {}", session_id, e);
                         break;
                     }
                 }
@@ -310,7 +310,7 @@ impl PtyHandler {
                         );
                         let mut sender = ws_sender.lock().await;
                         if let Err(e) = sender.send(Message::Text(response.to_json().into())).await {
-                            log_error!("发送 shell_event 失败: session_id={}, {}", session_id, e);
+                            log_error!("Failed to send shell_event: session_id={}, {}", session_id, e);
                             break;
                         }
                     }
@@ -319,13 +319,13 @@ impl PtyHandler {
                 batch_buffer.clear();
 
                 if let Some(e) = pending_error {
-                    log_error!("PTY 输出读取错误: session_id={}, {}", session_id, e);
+                    log_error!("Failed to read PTY output: session_id={}, {}", session_id, e);
                     break;
                 }
 
                 if pending_exit {
                     // EOF: the process has exited
-                    log_info!("PTY 输出结束: session_id={}", session_id);
+                    log_info!("PTY output ended: session_id={}", session_id);
 
                     // Send the exit event
                     let exit_response = ServerResponse::new(
@@ -338,7 +338,7 @@ impl PtyHandler {
                     );
                     let mut sender = ws_sender.lock().await;
                     if let Err(e) = sender.send(Message::Text(exit_response.to_json().into())).await {
-                        log_error!("发送 exit 事件失败: session_id={}, {}", session_id, e);
+                        log_error!("Failed to send exit event: session_id={}, {}", session_id, e);
                     }
                     break;
                 }
@@ -350,7 +350,7 @@ impl PtyHandler {
     
     /// Handle the resize message and resize the terminal
     async fn handle_resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<Option<ServerResponse>, RouterError> {
-        log_info!("调整终端尺寸: session_id={}, {}x{}", session_id, cols, rows);
+        log_info!("Resizing terminal: session_id={}, {}x{}", session_id, cols, rows);
         
         let sessions = self.sessions.lock().await;
         let context = sessions.get(session_id)
@@ -358,7 +358,7 @@ impl PtyHandler {
         
         let mut pty = context.session.lock().await;
         pty.resize(cols, rows)
-            .map_err(|e| RouterError::ModuleError(format!("调整终端尺寸失败: {}", e)))?;
+            .map_err(|e| RouterError::ModuleError(format!("Failed to resize terminal: {}", e)))?;
         
         Ok(None) // resize does not require a response
     }
@@ -371,14 +371,14 @@ impl PtyHandler {
         
         let mut w = context.writer.lock().unwrap();
         w.write(data)
-            .map_err(|e| RouterError::ModuleError(format!("写入 PTY 失败: {}", e)))?;
+            .map_err(|e| RouterError::ModuleError(format!("Failed to write to PTY: {}", e)))?;
         
         Ok(())
     }
     
     /// Destroy the specified session
     pub async fn handle_destroy(&self, session_id: &str) -> Result<(), RouterError> {
-        log_info!("销毁 PTY 会话: session_id={}", session_id);
+        log_info!("Destroying PTY session: session_id={}", session_id);
         
         let mut sessions = self.sessions.lock().await;
         if let Some(mut context) = sessions.remove(session_id) {
@@ -391,11 +391,11 @@ impl PtyHandler {
             if let Some(task) = context.read_task.take() {
                 tokio::spawn(async move {
                     let _ = task.await;
-                    log_debug!("读取任务已终止");
+                    log_debug!("Reader task terminated");
                 });
             }
             
-            log_info!("PTY 会话已销毁: session_id={}", session_id);
+            log_info!("PTY session destroyed: session_id={}", session_id);
             Ok(())
         } else {
             Err(RouterError::ModuleError(format!("SESSION_NOT_FOUND: {}", session_id)))
@@ -404,11 +404,11 @@ impl PtyHandler {
     
     /// Clean up all sessions (called when the connection closes)
     pub async fn cleanup_all(&self) {
-        log_info!("清理所有 PTY 会话");
+        log_info!("Cleaning up all PTY sessions");
         
         let mut sessions = self.sessions.lock().await;
         for (session_id, mut context) in sessions.drain() {
-            log_info!("清理会话: {}", session_id);
+            log_info!("Cleaning up session: {}", session_id);
             
             // Terminate the PTY process
             if let Ok(mut session) = context.session.try_lock() {
@@ -421,7 +421,7 @@ impl PtyHandler {
             }
         }
         
-        log_info!("所有 PTY 会话已清理");
+        log_info!("All PTY sessions cleaned up");
     }
     
     /// Check whether any sessions are active
@@ -444,7 +444,7 @@ impl ModuleHandler for PtyHandler {
     }
     
     async fn handle(&self, msg: &ModuleMessage) -> Result<Option<ServerResponse>, RouterError> {
-        log_debug!("处理 PTY 消息: {}", msg.msg_type);
+        log_debug!("Handling PTY message: {}", msg.msg_type);
         
         match msg.msg_type.as_str() {
             "init" => {
@@ -483,12 +483,12 @@ impl ModuleHandler for PtyHandler {
                 // In the original implementation, the env command only logged data; actual environment variables are set during init
                 let cwd: Option<String> = msg.get_field("cwd");
                 let env: Option<HashMap<String, String>> = msg.get_field("env");
-                log_info!("收到 env 命令: cwd={:?}, env={:?}", cwd, env);
+                log_info!("Received env command: cwd={:?}, env={:?}", cwd, env);
                 Ok(None)
             }
             _ => {
-                log_debug!("未知的 PTY 消息类型: {}", msg.msg_type);
-                Err(RouterError::ModuleError(format!("未知的 PTY 消息类型: {}", msg.msg_type)))
+                log_debug!("Unknown PTY message type: {}", msg.msg_type);
+                Err(RouterError::ModuleError(format!("Unknown PTY message type: {}", msg.msg_type)))
             }
         }
     }

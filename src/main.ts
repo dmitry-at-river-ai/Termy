@@ -143,7 +143,10 @@ export default class TerminalPlugin extends Plugin {
       const { ServerManager } = await import('./services/server/serverManager');
       
       const pluginDir = this.getPluginDir();
-      const version = this.manifest.version;
+      // Local fork: the deployed manifest version is bumped to keep the
+      // community updater away, so pin the PTY server binary to the upstream
+      // release this source tree corresponds to instead of manifest.version.
+      const version = '1.4.1';
       const binaryDownloadConfig = {
         source: this.settings.serverConnection?.binaryDownloadSource ?? 'cloudflare-r2',
       };
@@ -235,6 +238,14 @@ export default class TerminalPlugin extends Plugin {
 
     // Delay UI initialization until the layout is ready whenever possible
     this.app.workspace.onLayoutReady(() => {
+      // Keep the PTY backend warm for the lifetime of the plugin. In
+      // particular, task/layout switches may close the last terminal view and
+      // create its replacement in adjacent lifecycle callbacks.
+      void this.getServerManager()
+        .then(serverManager => serverManager.ensureServer())
+        .catch((error) => {
+          errorLog('[TerminalPlugin] Failed to warm terminal server:', error);
+        });
       this.initStatusBar();
       if (this.settings.visibility.showInNewTab) {
         this.registerNewTabTerminalAction();
@@ -607,6 +618,54 @@ export default class TerminalPlugin extends Plugin {
     if (this.settings.focusNewInstance) {
       workspace.setActiveLeaf(leaf, { focus: true });
     }
+  }
+
+  /**
+   * Public API: open a new terminal running a specific program instead of the
+   * default shell. Intended for use by other plugins.
+   *
+   * Example:
+   *   await app.plugins.plugins.termy.openTerminalWith({
+   *     shellPath: '/opt/homebrew/bin/zmx',
+   *     shellArgs: ['attach', 'my-session'],
+   *     cwd: '/some/dir',
+   *     title: 'my-session',
+   *   });
+   */
+  async openTerminalWith(options: {
+    shellPath?: string;
+    shellArgs?: string[];
+    cwd?: string;
+    env?: Record<string, string>;
+    title?: string;
+    targetLeaf?: WorkspaceLeaf;
+  } = {}): Promise<TerminalInstance | null> {
+    const terminalService = await this.getTerminalService();
+    const leaf = options.targetLeaf ?? this.getLeafForNewTerminal();
+    terminalService.nextCreateOverrides = {
+      shellType: options.shellPath ? `custom:${options.shellPath}` : undefined,
+      // When spawning a specific program, never fall back to the global
+      // shell args meant for the default shell.
+      shellArgs: options.shellArgs ?? (options.shellPath ? [] : undefined),
+      cwd: options.cwd,
+      env: options.env,
+    };
+    try {
+      await this.activateTerminalView(leaf);
+    } catch (error) {
+      terminalService.nextCreateOverrides = null;
+      throw error;
+    }
+    if (!this.isTerminalView(leaf.view)) {
+      return null;
+    }
+    const terminalView = leaf.view;
+    const terminal = await terminalView.waitForTerminalInstance();
+    if (options.title) {
+      terminal.setTitle(options.title);
+      this.updateLeafHeader(terminalView.leaf);
+    }
+    return terminal;
   }
 
   async toggleAlwaysOnTopTerminal(terminalView?: TerminalView | null): Promise<void> {

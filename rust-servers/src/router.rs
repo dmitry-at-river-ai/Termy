@@ -200,7 +200,7 @@ impl MessageRouter {
         // First try to parse it as a ModuleMessage
         let msg: ModuleMessage = serde_json::from_str(text)?;
         
-        log_debug!("解析消息: module={}, type={}", msg.module, msg.msg_type);
+        log_debug!("Parsing message: module={}, type={}", msg.module, msg.msg_type);
         
         Ok(msg)
     }
@@ -225,12 +225,12 @@ impl MessageRouter {
     /// Returns the module handling result or an error
     /// 
     pub async fn route(&self, msg: ModuleMessage) -> Result<Option<ServerResponse>, RouterError> {
-        log_info!("路由消息到模块: {}, 类型: {}", msg.module, msg.msg_type);
+        log_info!("Routing message to module: {}, type: {}", msg.module, msg.msg_type);
         
         match msg.module {
             ModuleType::Pty => {
                 // PTY module handling
-                log_debug!("PTY 模块消息: {}", msg.msg_type);
+                log_debug!("PTY module message: {}", msg.msg_type);
                 self.pty_handler.handle(&msg).await
             }
         }
@@ -240,10 +240,10 @@ impl MessageRouter {
     /// 
     pub fn create_error_response(&self, module: ModuleType, error: &RouterError) -> ServerResponse {
         let (code, message) = match error {
-            RouterError::UnknownModule(m) => ("UNKNOWN_MODULE", format!("未知模块: {}", m)),
-            RouterError::InvalidMessage(m) => ("INVALID_MESSAGE", format!("无效消息: {}", m)),
+            RouterError::UnknownModule(m) => ("UNKNOWN_MODULE", format!("Unknown module: {}", m)),
+            RouterError::InvalidMessage(m) => ("INVALID_MESSAGE", format!("Invalid message: {}", m)),
             RouterError::ModuleError(m) => ("MODULE_ERROR", m.clone()),
-            RouterError::JsonError(e) => ("JSON_ERROR", format!("JSON 错误: {}", e)),
+            RouterError::JsonError(e) => ("JSON_ERROR", format!("JSON error: {}", e)),
         };
         
         ServerResponse::error(module, code, &message)

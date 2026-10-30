@@ -56,7 +56,7 @@ impl Server {
         let local_addr = listener.local_addr()?;
         let port = local_addr.port();
 
-        log_info!("服务器绑定到 {}", local_addr);
+        log_info!("Server bound to {}", local_addr);
 
         // Write port information to stdout in JSON format
         // The TypeScript side parses this JSON to get the port number
@@ -68,12 +68,12 @@ impl Server {
 
         // Main loop: accept WebSocket connections
         tokio::spawn(async move {
-            log_info!("正在监听 WebSocket 连接...");
+            log_info!("Listening for WebSocket connections...");
             while let Ok((stream, addr)) = listener.accept().await {
-                log_debug!("接受来自 {} 的连接", addr);
+                log_debug!("Accepted connection from {}", addr);
                 tokio::spawn(async move {
                     if let Err(e) = handle_connection(stream).await {
-                        log_error!("连接处理错误: {}", e);
+                        log_error!("Connection handler failed: {}", e);
                     }
                 });
             }
@@ -100,7 +100,7 @@ async fn handle_connection(
     // Upgrade to WebSocket
     let ws_stream = accept_async(stream).await?;
     
-    log_info!("WebSocket 连接已建立");
+    log_info!("WebSocket connected");
     
     // Split the read and write streams
     let (ws_sender, mut ws_receiver) = ws_stream.split();
@@ -116,7 +116,7 @@ async fn handle_connection(
     while let Some(msg_result) = ws_receiver.next().await {
         match msg_result {
             Ok(msg) => {
-                log_debug!("收到消息类型: {:?}", std::mem::discriminant(&msg));
+                log_debug!("Received message type: {:?}", std::mem::discriminant(&msg));
                 
                 match msg {
                     Message::Text(text) => {
@@ -126,42 +126,42 @@ async fn handle_connection(
                             &router,
                             &ws_sender
                         ).await {
-                            log_error!("消息处理错误: {}", e);
+                            log_error!("Message handling failed: {}", e);
                         }
                     }
                     Message::Binary(data) => {
                         // Binary data, written to the PTY
                         // Format: [session_id_length: u8][session_id: bytes][data: bytes]
-                        log_debug!("收到二进制数据: {} 字节", data.len());
+                        log_debug!("Received binary data: {} bytes", data.len());
                         
                         if data.len() < 2 {
-                            log_error!("二进制数据格式错误: 数据太短");
+                            log_error!("Invalid binary data: message is too short");
                             continue;
                         }
                         
                         let session_id_len = data[0] as usize;
                         if data.len() < 1 + session_id_len {
-                            log_error!("二进制数据格式错误: session_id 长度不足");
+                            log_error!("Invalid binary data: session_id is truncated");
                             continue;
                         }
                         
                         let session_id = match std::str::from_utf8(&data[1..1 + session_id_len]) {
                             Ok(s) => s,
                             Err(e) => {
-                                log_error!("二进制数据格式错误: session_id 不是有效 UTF-8: {}", e);
+                                log_error!("Invalid binary data: session_id is not valid UTF-8: {}", e);
                                 continue;
                             }
                         };
                         
                         let pty_data = &data[1 + session_id_len..];
-                        log_debug!("写入 PTY: session_id={}, {} 字节", session_id, pty_data.len());
+                        log_debug!("Writing to PTY: session_id={}, {} bytes", session_id, pty_data.len());
                         
                         if let Err(e) = router.pty_handler().write_data(session_id, pty_data).await {
-                            log_error!("写入 PTY 失败: session_id={}, {}", session_id, e);
+                            log_error!("Failed to write to PTY: session_id={}, {}", session_id, e);
                         }
                     }
                     Message::Close(_) => {
-                        log_info!("客户端关闭连接");
+                        log_info!("Client closed the connection");
                         break;
                     }
                     Message::Ping(data) => {
@@ -173,18 +173,18 @@ async fn handle_connection(
                         // Ignore Pong
                     }
                     _ => {
-                        log_debug!("忽略的消息类型");
+                        log_debug!("Ignoring unsupported message type");
                     }
                 }
             }
             Err(e) => {
-                log_error!("消息接收错误: {}", e);
+                log_error!("Failed to receive message: {}", e);
                 break;
             }
         }
     }
     
-    log_info!("WebSocket 连接已关闭");
+    log_info!("WebSocket disconnected");
     
     // Clean up all PTY sessions
     router.pty_handler().cleanup_all().await;
@@ -211,11 +211,11 @@ async fn handle_text_message(
                 }
                 Ok(None) => {
                     // The module handled the message successfully and no response is needed
-                    log_debug!("模块处理完成，无响应");
+                    log_debug!("Module handling completed with no response");
                 }
                 Err(e) => {
                     // Module handling failed, so send an error response
-                    log_error!("模块处理错误: {}", e);
+                    log_error!("Module handling failed: {}", e);
                     let error_response = router.create_error_response(module, &e);
                     send_response(ws_sender, &error_response).await?;
                 }
@@ -223,7 +223,7 @@ async fn handle_text_message(
         }
         Err(e) => {
             // Message parsing failed
-            log_error!("消息解析错误: {}", e);
+            log_error!("Message parsing failed: {}", e);
             
             // Try to extract the module field from the raw JSON for the error response
             let module = extract_module_from_json(text);
@@ -255,7 +255,7 @@ fn create_parse_error_response(module: ModuleType, error: &RouterError) -> Serve
     ServerResponse::error(
         module,
         "PARSE_ERROR",
-        &format!("消息解析失败: {}", error)
+        &format!("Failed to parse message: {}", error)
     )
 }
 

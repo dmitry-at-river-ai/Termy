@@ -85,10 +85,10 @@ pub fn get_shell_by_type(shell_type: Option<&str>) -> CommandBuilder {
             {
                 // Explicitly use Windows PowerShell 5.x instead of pwsh
                 if let Ok(path) = which("powershell") {
-                    eprintln!("[INFO] [Shell] 使用 PowerShell 5.x: {}", path.display());
+                    eprintln!("[INFO] [Shell] Using PowerShell 5.x: {}", path.display());
                     CommandBuilder::new(path.to_string_lossy().into_owned())
                 } else {
-                    eprintln!("[WARN] [Shell] PowerShell 未在 PATH 中找到，使用默认路径");
+                    eprintln!("[WARN] [Shell] PowerShell not found in PATH; using the default path");
                     CommandBuilder::new("powershell.exe")
                 }
             }
@@ -103,16 +103,16 @@ pub fn get_shell_by_type(shell_type: Option<&str>) -> CommandBuilder {
             {
                 // Explicitly use PowerShell Core (pwsh)
                 if let Ok(path) = which("pwsh") {
-                    eprintln!("[INFO] [Shell] 使用 PowerShell 7: {}", path.display());
+                    eprintln!("[INFO] [Shell] Using PowerShell 7: {}", path.display());
                     CommandBuilder::new(path.to_string_lossy().into_owned())
                 } else {
-                    eprintln!("[WARN] [Shell] PowerShell 7 未安装，降级到 PowerShell 5.x");
+                    eprintln!("[WARN] [Shell] PowerShell 7 is not installed; falling back to PowerShell 5.x");
                     // Fall back to Windows PowerShell
                     if let Ok(path) = which("powershell") {
-                        eprintln!("[INFO] [Shell] 使用 PowerShell 5.x: {}", path.display());
+                        eprintln!("[INFO] [Shell] Using PowerShell 5.x: {}", path.display());
                         CommandBuilder::new(path.to_string_lossy().into_owned())
                     } else {
-                        eprintln!("[WARN] [Shell] PowerShell 未在 PATH 中找到，使用默认路径");
+                        eprintln!("[WARN] [Shell] PowerShell not found in PATH; using the default path");
                         CommandBuilder::new("powershell.exe")
                     }
                 }

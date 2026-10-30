@@ -39,7 +39,7 @@ export abstract class ModuleClient {
     this.ws = ws;
     
     if (ws) {
-      debugLog(`[${this.module}Client] WebSocket 已设置`);
+      debugLog(`[${this.module}Client] WebSocket configured`);
     }
   }
 
@@ -58,7 +58,7 @@ export abstract class ModuleClient {
    */
   protected send(type: string, payload: Record<string, unknown> = {}): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      errorLog(`[${this.module}Client] WebSocket 未连接，无法发送消息`);
+      errorLog(`[${this.module}Client] WebSocket is not connected; cannot send message`);
       return;
     }
 
@@ -70,9 +70,9 @@ export abstract class ModuleClient {
 
     try {
       this.ws.send(JSON.stringify(message));
-      debugLog(`[${this.module}Client] 发送消息:`, type);
+      debugLog(`[${this.module}Client] Sending message:`, type);
     } catch (error) {
-      errorLog(`[${this.module}Client] 发送消息失败:`, error);
+      errorLog(`[${this.module}Client] Failed to send message:`, error);
     }
   }
 
@@ -83,14 +83,14 @@ export abstract class ModuleClient {
    */
   protected sendBinary(data: ArrayBuffer | Uint8Array): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      errorLog(`[${this.module}Client] WebSocket 未连接，无法发送二进制数据`);
+      errorLog(`[${this.module}Client] WebSocket is not connected; cannot send binary data`);
       return;
     }
 
     try {
       this.ws.send(data);
     } catch (error) {
-      errorLog(`[${this.module}Client] 发送二进制数据失败:`, error);
+      errorLog(`[${this.module}Client] Failed to send binary data:`, error);
     }
   }
 
@@ -111,7 +111,7 @@ export abstract class ModuleClient {
       try {
         handler(msg);
       } catch (error) {
-        errorLog(`[${this.module}Client] 消息处理器错误:`, error);
+        errorLog(`[${this.module}Client] Message handler failed:`, error);
       }
     });
 

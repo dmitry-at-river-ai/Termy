@@ -83,11 +83,11 @@ let xtermModules: {
 async function loadXtermModules() {
   // Return cached modules immediately if available
   if (xtermModules) {
-    debugLog('[Terminal] 使用缓存的 xterm.js 模块');
+    debugLog('[Terminal] Using cached xterm.js modules');
     return xtermModules;
   }
   
-  debugLog('[Terminal] 动态加载 xterm.js 模块...');
+  debugLog('[Terminal] Loading xterm.js modules...');
   
   try {
     const [
@@ -112,12 +112,12 @@ async function loadXtermModules() {
     }
     
     xtermModules = { Terminal, FitAddon, SearchAddon, CanvasAddon, WebglAddon, WebLinksAddon };
-    debugLog('[Terminal] xterm.js 模块加载完成');
+    debugLog('[Terminal] xterm.js modules loaded');
     
     return xtermModules;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    errorLog('[Terminal] xterm.js 模块加载失败:', error);
+    errorLog('[Terminal] Failed to load xterm.js modules:', error);
     
     // Clear any partial cache that may have been created
     xtermModules = null;
@@ -307,10 +307,10 @@ export class TerminalInstance {
       this.setupClaudeCodeTuiHandlers();
       this.setupColorSchemeHandlers();
       
-      debugLog('[Terminal] xterm.js 实例初始化完成');
+      debugLog('[Terminal] xterm.js instance initialized');
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      errorLog('[Terminal] xterm.js 初始化失败:', error);
+      errorLog('[Terminal] Failed to initialize xterm.js:', error);
       throw new Error(t('terminalInstance.xtermInitFailed', { message: errorMsg }));
     }
   }
@@ -357,12 +357,18 @@ export class TerminalInstance {
       const fgFromVar = computed?.getPropertyValue('--text-normal').trim();
       const cursorFromVar = computed?.getPropertyValue('--text-normal').trim();
       const selectionFromVar = computed?.getPropertyValue('--text-selection').trim();
+      // Obsidian's light-theme selection color may contain unresolved CSS
+      // variables. xterm.js cannot parse those and falls back to a translucent
+      // white selection, which disappears against a white terminal background.
+      const selectionColor = isDark
+        ? (selectionFromVar || '#264f78')
+        : 'rgba(0, 120, 215, 0.4)';
       return {
         background: bgFromVar || (isDark ? '#1e1e1e' : '#ffffff'),
         foreground: fgFromVar || (isDark ? '#cccccc' : '#333333'),
         cursor: cursorFromVar || (isDark ? '#ffffff' : '#000000'),
         cursorAccent: bgFromVar || (isDark ? '#000000' : '#ffffff'),
-        selectionBackground: selectionFromVar || (isDark ? '#264f78' : '#add6ff'),
+        selectionBackground: selectionColor,
       };
     }
 
@@ -595,7 +601,7 @@ export class TerminalInstance {
       this.setupXtermHandlers();
       this.isInitialized = true;
       
-      debugLog('[Terminal] 终端已初始化');
+      debugLog('[Terminal] Terminal initialized');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       errorLog('[Terminal] Init failed:', error);
@@ -626,14 +632,14 @@ export class TerminalInstance {
     
     // Handle exit events (session-level)
     this.exitUnsubscribe = this.ptyClient.onSessionExit(this.sessionId, (code: number) => {
-      debugLog('[Terminal] PTY 会话退出, code:', code);
-      this.xterm.write(`\r\n\x1b[33m[会话已结束, 退出码: ${code}]\x1b[0m\r\n`);
+      debugLog('[Terminal] PTY session exited, code:', code);
+      this.xterm.write(`\r\n\x1b[33m[Session ended, exit code: ${code}]\x1b[0m\r\n`);
     });
     
     // Handle error events (session-level)
     this.errorUnsubscribe = this.ptyClient.onSessionError(this.sessionId, (code: string, message: string) => {
-      errorLog('[Terminal] PTY 错误:', code, message);
-      this.xterm.write(`\r\n\x1b[1;31m[错误] ${message}\x1b[0m\r\n`);
+      errorLog('[Terminal] PTY error:', code, message);
+      this.xterm.write(`\r\n\x1b[1;31m[Error] ${message}\x1b[0m\r\n`);
     });
 
     // Handle shell integration events
@@ -669,7 +675,7 @@ export class TerminalInstance {
 
     this.ptyClient = ptyClient;
     this.sessionId = sessionId;
-    debugLog('[Terminal] 获取到 session_id:', this.sessionId);
+    debugLog('[Terminal] Received session_id:', this.sessionId);
     this.setupPtyClientHandlers();
   }
 
@@ -966,11 +972,48 @@ export class TerminalInstance {
       const { clientWidth, clientHeight } = this.containerEl;
       if (clientWidth === 0 || clientHeight === 0) return;
 
+      const buffer = this.xterm.buffer.active;
+      const wasAtBottom = buffer.viewportY >= buffer.baseY;
       this.fitAddon.fit();
       this.sendResize(this.xterm.cols, this.xterm.rows);
+      if (wasAtBottom) {
+        this.forceScrollToBottom();
+      }
     } catch (error) {
       debugWarn('[Terminal] Fit failed:', error);
     }
+  }
+
+  /**
+   * Pin the viewport to the exact bottom of the buffer.
+   *
+   * After a refit (pane reopened, tab switched back, view resized) the buffer
+   * may already report ydisp === ybase while the smooth-scroll viewport's
+   * pixel position is stale from when the pane was hidden, leaving the
+   * content a few pixels above the bottom. The public scrollToBottom() is a
+   * no-op in that state, so go through the core terminal's
+   * scrollToBottom(disableSmoothScroll) which re-syncs the viewport's pixel
+   * position unconditionally. Runs once immediately and once again after the
+   * viewport's own queued dimension sync has had a frame to land.
+   */
+  private forceScrollToBottom(): void {
+    const scrollNow = (): void => {
+      if (this.isDestroyed) return;
+      const core = (this.xterm as unknown as {
+        _core?: { scrollToBottom?: (disableSmoothScroll?: boolean) => void };
+      })._core;
+      if (core?.scrollToBottom) {
+        core.scrollToBottom(true);
+      } else {
+        this.xterm.scrollToBottom();
+      }
+    };
+
+    scrollNow();
+    const win = this.hostWindow ?? window;
+    win.requestAnimationFrame(() => {
+      win.requestAnimationFrame(scrollNow);
+    });
   }
 
   handleServerCrash(): void {
@@ -979,8 +1022,8 @@ export class TerminalInstance {
     this.webSocketDisconnected = false;
     this.sessionRecoveryNeeded = true;
     this.clearPendingInput();
-    this.xterm.write('\r\n\x1b[1;31m[服务器已崩溃]\x1b[0m\r\n');
-    this.xterm.write('\x1b[33m正在尝试重启服务器...\x1b[0m\r\n');
+    this.xterm.write('\r\n\x1b[1;31m[Server crashed]\x1b[0m\r\n');
+    this.xterm.write('\x1b[33mAttempting to restart the server...\x1b[0m\r\n');
   }
 
   handleWebSocketDisconnected(): void {
@@ -990,7 +1033,7 @@ export class TerminalInstance {
     this.clearPendingInput();
     if (this.webSocketDisconnected) return;
     this.webSocketDisconnected = true;
-    this.xterm.write('\r\n\x1b[33m[WebSocket 连接已断开，正在重连...]\x1b[0m\r\n');
+    this.xterm.write('\r\n\x1b[33m[WebSocket disconnected; reconnecting...]\x1b[0m\r\n');
   }
 
   async handleWebSocketConnected(serverManager: ServerManager): Promise<void> {
@@ -1003,7 +1046,7 @@ export class TerminalInstance {
     }
 
     this.sessionRecoveryInProgress = true;
-    this.xterm.write('\x1b[32m[连接已恢复，正在恢复终端会话...]\x1b[0m\r\n');
+    this.xterm.write('\x1b[32m[Connection restored; recovering terminal session...]\x1b[0m\r\n');
 
     try {
       this.disposePtyClientHandlers();
@@ -1018,21 +1061,21 @@ export class TerminalInstance {
           throw error;
         }
 
-        debugWarn('[Terminal] 使用当前目录恢复会话失败，回退到初始目录:', error);
+        debugWarn('[Terminal] Failed to recover session in current directory; falling back to initial directory:', error);
         await this.initializePtySession(serverManager, this.options.cwd);
       }
       if (this.isDestroyed) return;
 
       this.sessionRecoveryNeeded = false;
       this.webSocketDisconnected = false;
-      this.xterm.write('\x1b[32m[终端会话已恢复]\x1b[0m\r\n');
+      this.xterm.write('\x1b[32m[Terminal session recovered]\x1b[0m\r\n');
       this.fit();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      errorLog('[Terminal] 恢复终端会话失败:', error);
+      errorLog('[Terminal] Failed to recover terminal session:', error);
       this.sessionRecoveryNeeded = true;
       this.webSocketDisconnected = true;
-      this.xterm.write(`\x1b[1;31m[终端会话恢复失败] ${errorMessage}\x1b[0m\r\n`);
+      this.xterm.write(`\x1b[1;31m[Terminal session recovery failed] ${errorMessage}\x1b[0m\r\n`);
     } finally {
       this.sessionRecoveryInProgress = false;
     }
@@ -1116,7 +1159,7 @@ export class TerminalInstance {
         })
         .catch((error) => {
           const errorMsg = error instanceof Error ? error.message : String(error);
-          this.xterm.write(`\r\n\x1b[1;31m[渲染器错误] ${errorMsg}\x1b[0m\r\n`);
+          this.xterm.write(`\r\n\x1b[1;31m[Renderer error] ${errorMsg}\x1b[0m\r\n`);
         });
     });
   }
@@ -1185,39 +1228,38 @@ export class TerminalInstance {
         return;
       }
       
-      // Ctrl+plus/equal: Increase font size
+      // Ctrl/Cmd+plus/equal: Increase font size.
+      // stopPropagation keeps Obsidian's identically-bound "Zoom in" hotkey from
+      // also scaling the whole app window while the terminal is focused.
       if (isCtrlOrCmd && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
+        e.stopPropagation();
         this.increaseFontSize();
         return;
       }
       
-      // Ctrl+minus: Decrease font size
+      // Ctrl/Cmd+minus: Decrease font size
       if (isCtrlOrCmd && e.key === '-') {
         e.preventDefault();
+        e.stopPropagation();
         this.decreaseFontSize();
         return;
       }
       
-      // Ctrl+0: Reset font size
+      // Ctrl/Cmd+0: Reset font size
       if (isCtrlOrCmd && e.key === '0') {
         e.preventDefault();
+        e.stopPropagation();
         this.resetFontSize();
         return;
       }
     });
 
-    // Ctrl+wheel: Adjust font size
-    this.addDomEventListener(container, 'wheel', (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        if (e.deltaY < 0) {
-          this.increaseFontSize();
-        } else {
-          this.decreaseFontSize();
-        }
-      }
-    }, { passive: false });
+    // Font size is intentionally keyboard-only (Ctrl/Cmd +/-/0). Modifier+wheel
+    // zoom used to be handled here, but it fired accidentally during ordinary
+    // scrolling: trackpad pinch gestures and inertial scrolls both arrive as
+    // wheel events with ctrlKey set, so the terminal resized itself while the
+    // user was only trying to scroll back through output.
   }
 
   /**

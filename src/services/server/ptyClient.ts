@@ -245,7 +245,7 @@ export class PtyClient extends ModuleClient {
         try {
           handler(data);
         } catch (error) {
-          errorLog(`[PtyClient] 会话事件处理器错误 (${sessionId}/output):`, error);
+          errorLog(`[PtyClient] Session event handler failed (${sessionId}/output):`, error);
         }
       });
     }
@@ -261,7 +261,7 @@ export class PtyClient extends ModuleClient {
         try {
           handler(code);
         } catch (error) {
-          errorLog(`[PtyClient] 会话事件处理器错误 (${sessionId}/exit):`, error);
+          errorLog(`[PtyClient] Session event handler failed (${sessionId}/exit):`, error);
         }
       });
     }
@@ -277,7 +277,7 @@ export class PtyClient extends ModuleClient {
         try {
           handler(code, message);
         } catch (error) {
-          errorLog(`[PtyClient] 会话事件处理器错误 (${sessionId}/error):`, error);
+          errorLog(`[PtyClient] Session event handler failed (${sessionId}/error):`, error);
         }
       });
     }
@@ -293,7 +293,7 @@ export class PtyClient extends ModuleClient {
         try {
           handler(event);
         } catch (error) {
-          errorLog(`[PtyClient] 会话事件处理器错误 (${sessionId}/shell_event):`, error);
+          errorLog(`[PtyClient] Session event handler failed (${sessionId}/shell_event):`, error);
         }
       });
     }
@@ -373,14 +373,14 @@ export class PtyClient extends ModuleClient {
     const bytes = new Uint8Array(data);
     
     if (bytes.length < 2) {
-      errorLog('[PtyClient] 二进制消息太短');
+      errorLog('[PtyClient] Binary message is too short');
       return;
     }
     
     // Parse session_id
     const sessionIdLength = bytes[0];
     if (bytes.length < 1 + sessionIdLength) {
-      errorLog('[PtyClient] 二进制消息格式错误: session_id 长度不足');
+      errorLog('[PtyClient] Invalid binary message: session_id is truncated');
       return;
     }
     
@@ -390,7 +390,7 @@ export class PtyClient extends ModuleClient {
     // Extract data
     const outputData = bytes.slice(1 + sessionIdLength);
     
-    debugLog(`[PtyClient] 收到会话 ${sessionId} 的输出, 长度: ${outputData.length}`);
+    debugLog(`[PtyClient] Received output for session ${sessionId}, length: ${outputData.length}`);
     
     // Emit the session-scoped event
     this.emitSessionOutput(sessionId, outputData);

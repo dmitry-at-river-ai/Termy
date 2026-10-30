@@ -51,3 +51,7 @@ docs/
 # Personal scratch notes (not part of the plugin)
 t.md
 new_t.md
+
+# Local agent state and stray lockfile (the project uses pnpm)
+.pi/
+bun.lock

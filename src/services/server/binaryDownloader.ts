@@ -161,7 +161,7 @@ export class BinaryDownloader {
       // If execution is skipped, treat the binary as the manifest version.
       // This branch is also used when offline mode prevents fresh downloads.
       if (skipExecution) {
-        debugLog('[BinaryDownloader] 跳过版本检测，使用预期版本:', this.version);
+        debugLog('[BinaryDownloader] Skipping version detection; using expected version:', this.version);
         this.installedVersionCache = this.version;
         this.writeCachedVersion(binaryPath, this.version);
         return this.version;
@@ -170,13 +170,13 @@ export class BinaryDownloader {
       // Cache miss with no override: report unknown so callers fall back
       // to a fresh download, which writes the cache for future loads.
       debugWarn(
-        '[BinaryDownloader] 找不到版本缓存文件，将触发重新下载以重建缓存:',
+        '[BinaryDownloader] Version cache file not found; downloading again to rebuild the cache:',
         this.getVersionCachePath()
       );
       this.installedVersionCache = null;
       return null;
     } catch (error) {
-      debugWarn('[BinaryDownloader] 获取二进制版本异常:', error);
+      debugWarn('[BinaryDownloader] Failed to detect the installed binary version:', error);
     }
 
     this.installedVersionCache = null;
@@ -207,7 +207,7 @@ export class BinaryDownloader {
     const tempPath = this.getTempBinaryPath(binaryPath);
 
     try {
-      debugLog('[BinaryDownloader] 准备下载二进制:', {
+      debugLog('[BinaryDownloader] Preparing binary download:', {
         version: this.version,
         source: this.downloadConfig.source,
         binaryPath,
@@ -242,10 +242,10 @@ export class BinaryDownloader {
       } catch (downloadError) {
         // If the download fails, provide detailed error information
         const errorMsg = downloadError instanceof Error ? downloadError.message : String(downloadError);
-        debugWarn('[BinaryDownloader] 下载失败:', errorMsg);
+        debugWarn('[BinaryDownloader] Download failed:', errorMsg);
         
         if (errorMsg.includes('404') && this.downloadConfig.source === 'github-release') {
-          debugLog('[BinaryDownloader] 指定版本不存在，尝试下载 GitHub latest...');
+          debugLog('[BinaryDownloader] Requested version not found; trying GitHub latest...');
           const latestBinaryInfo = this.getBinaryInfo('latest');
 
           await this.downloadFile(latestBinaryInfo.url, tempPath, (percent, downloadedBytes, totalBytes) => {
@@ -268,12 +268,12 @@ export class BinaryDownloader {
       // Download and verify the checksum
       if (binaryInfo.checksumUrl) {
         try {
-          debugLog('[BinaryDownloader] 拉取校验和:', binaryInfo.checksumUrl);
+          debugLog('[BinaryDownloader] Fetching checksum:', binaryInfo.checksumUrl);
           const checksumContent = await this.fetchText(binaryInfo.checksumUrl);
           const expectedHash = checksumContent.split(/\s+/)[0].toLowerCase();
           
           const actualHash = await this.calculateSHA256(tempPath);
-          debugLog('[BinaryDownloader] 校验和对比:', {
+          debugLog('[BinaryDownloader] Comparing checksum:', {
             expectedHash,
             actualHash,
             file: tempPath,
@@ -284,14 +284,14 @@ export class BinaryDownloader {
             this.safeUnlink(tempPath);
             throw new Error(
               t('notices.checksumMismatch') || 
-              `校验和不匹配: 期望 ${expectedHash}, 实际 ${actualHash}`
+              `Checksum mismatch: expected ${expectedHash}, got ${actualHash}`
             );
           }
           
-          debugLog('[BinaryDownloader] SHA256 校验通过');
+          debugLog('[BinaryDownloader] SHA256 verification passed');
         } catch (checksumError) {
           // If checksum download fails, warn only and do not block usage
-          debugWarn('[BinaryDownloader] 校验和验证失败:', checksumError);
+          debugWarn('[BinaryDownloader] Checksum verification failed:', checksumError);
         }
       }
 
@@ -306,12 +306,12 @@ export class BinaryDownloader {
       
       notify({ stage: 'complete', percent: 100 });
       
-      debugLog('[BinaryDownloader] 二进制文件下载完成:', binaryPath);
+      debugLog('[BinaryDownloader] Binary download completed:', binaryPath);
       
     } catch (error) {
       this.safeUnlink(tempPath);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      errorLog('[BinaryDownloader] 下载失败:', errorMessage);
+      errorLog('[BinaryDownloader] Download failed:', errorMessage);
       
       notify({ 
         stage: 'error', 
@@ -335,7 +335,7 @@ export class BinaryDownloader {
     });
 
     debugLog(
-      '[BinaryDownloader] 使用二进制下载 URL:',
+      '[BinaryDownloader] Using binary download URL:',
       binaryInfo.url,
       `(source: ${this.downloadConfig.source}, channel: ${releaseChannel})`
     );
@@ -351,9 +351,9 @@ export class BinaryDownloader {
     destPath: string,
     onProgress?: (percent: number, downloadedBytes: number, totalBytes: number) => void
   ): Promise<void> {
-    debugLog('[BinaryDownloader] 开始下载:', { url, destPath });
+    debugLog('[BinaryDownloader] Starting download:', { url, destPath });
     await this.downloadFileWithRedirect(url, destPath, onProgress, 5);
-    debugLog('[BinaryDownloader] 文件已保存:', destPath);
+    debugLog('[BinaryDownloader] File saved:', destPath);
   }
 
   private async downloadFileWithRedirect(
@@ -380,11 +380,11 @@ export class BinaryDownloader {
           if (statusCode >= 300 && statusCode < 400 && redirectLocation) {
             response.resume();
             if (remainingRedirects <= 0) {
-              reject(new Error('下载失败: 重定向次数过多'));
+              reject(new Error('Download failed: too many redirects'));
               return;
             }
             const nextUrl = new URL(redirectLocation, urlObj).toString();
-            debugLog('[BinaryDownloader] 跟随重定向:', {
+            debugLog('[BinaryDownloader] Following redirect:', {
               from: urlObj.toString(),
               to: nextUrl,
               statusCode,
@@ -396,12 +396,12 @@ export class BinaryDownloader {
 
           if (statusCode !== 200) {
             response.resume();
-            reject(new Error(`下载失败: HTTP ${statusCode}`));
+            reject(new Error(`Download failed: HTTP ${statusCode}`));
             return;
           }
 
           const totalBytes = Number(response.headers['content-length'] || 0);
-          debugLog('[BinaryDownloader] 下载响应已开始:', {
+          debugLog('[BinaryDownloader] Download response started:', {
             url: urlObj.toString(),
             statusCode,
             totalBytes,
@@ -480,7 +480,7 @@ export class BinaryDownloader {
       
       return payload.version;
     } catch (error) {
-      debugWarn('[BinaryDownloader] 读取版本缓存失败:', error);
+      debugWarn('[BinaryDownloader] Failed to read version cache:', error);
       return null;
     }
   }
@@ -498,7 +498,7 @@ export class BinaryDownloader {
       this.fs.mkdirSync(this.path.dirname(cachePath), { recursive: true });
       this.fs.writeFileSync(cachePath, JSON.stringify(payload));
     } catch (error) {
-      debugWarn('[BinaryDownloader] 写入版本缓存失败:', error);
+      debugWarn('[BinaryDownloader] Failed to write version cache:', error);
     }
   }
 
@@ -523,7 +523,7 @@ export class BinaryDownloader {
         if (this.isFileBusyError(error)) {
           throw new Error(
             t('notices.binaryInUse') ||
-            '二进制文件被占用，请关闭 Obsidian 或结束 termy-server 进程后重试'
+            'The binary file is in use. Close Obsidian or stop termy-server, then try again.'
           );
         }
         throw error;
@@ -547,7 +547,7 @@ export class BinaryDownloader {
     try {
       this.fs.unlinkSync(filePath);
     } catch (error) {
-      debugWarn('[BinaryDownloader] 清理临时文件失败:', error);
+      debugWarn('[BinaryDownloader] Failed to clean up temporary file:', error);
     }
   }
 
@@ -574,7 +574,7 @@ export class BinaryDownloader {
           if (statusCode >= 300 && statusCode < 400 && redirectLocation) {
             response.resume();
             const nextUrl = new URL(redirectLocation, urlObj).toString();
-            debugLog('[BinaryDownloader] 文本请求重定向:', {
+            debugLog('[BinaryDownloader] Text request redirected:', {
               from: urlObj.toString(),
               to: nextUrl,
               statusCode,
@@ -585,7 +585,7 @@ export class BinaryDownloader {
 
           if (statusCode !== 200) {
             response.resume();
-            reject(new Error(`获取文本失败: HTTP ${statusCode}`));
+            reject(new Error(`Text request failed: HTTP ${statusCode}`));
             return;
           }
 
@@ -595,7 +595,7 @@ export class BinaryDownloader {
           });
 
           response.on('end', () => {
-            debugLog('[BinaryDownloader] 文本请求完成:', {
+            debugLog('[BinaryDownloader] Text request completed:', {
               url: urlObj.toString(),
               length: data.length,
             });
